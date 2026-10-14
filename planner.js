@@ -134,7 +134,7 @@
     if (back.days) pushTravel(back);
     else itinerary[itinerary.length - 1].items.push(`Return: ${label(back.mode)} to ${back.to} (${back.km} km, ~${back.hours} h)`);
 
-    return { days, nights, km, rooms, vehicles, legs, cost, perPerson: Math.round(cost.total / people), itinerary, notes };
+    return { days, nights, km, rooms, vehicles, legs, stops: stops.map(s => ({ n: s.n, ll: s.ll })), cost, perPerson: Math.round(cost.total / people), itinerary, notes };
   }
 
   const label = m => (MODES[m] ? MODES[m].label : "Cab");

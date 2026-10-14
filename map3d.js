@@ -9,6 +9,7 @@ import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 const { Yatra: Y, INDIA_MAP: M, INDIA_DISTRICTS: DIST, STATES, gsap } = window;
 const webgl = (() => { try { const c = document.createElement("canvas"); return !!(c.getContext("webgl2") || c.getContext("webgl")); } catch { return false; } })();
 if (Y && gsap && webgl && !matchMedia("(prefers-reduced-motion: reduce)").matches) init();
+else document.documentElement.classList.remove("will-3d"); // show the 2D map straight away
 
 function init() {
   const wrap = document.querySelector(".map-wrap"), panel = document.getElementById("panel");
@@ -32,10 +33,10 @@ function init() {
   const scene = new THREE.Scene();
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-  const camera = new THREE.PerspectiveCamera(32, 1, 1, 6000);
+  const camera = new THREE.PerspectiveCamera(32, 1, 1, 12000);
   camera.position.set(0, 2600, 1900);
   const controls = new OrbitControls(camera, renderer.domElement);
-  Object.assign(controls, { enableDamping: true, dampingFactor: 0.08, minDistance: 8, maxDistance: 2600,
+  Object.assign(controls, { enableDamping: true, dampingFactor: 0.08, minDistance: 8, maxDistance: 5000,
     minPolarAngle: 0.12, maxPolarAngle: 1.15, minAzimuthAngle: -0.7, maxAzimuthAngle: 0.7, zoomSpeed: 0.8 });
 
   scene.add(new THREE.HemisphereLight(0xaab8ff, 0x0a0e16, 0.7));
@@ -49,7 +50,7 @@ function init() {
   const rim = new THREE.DirectionalLight(0x6f8cff, 0.8);
   rim.position.set(500, 300, -600);
   scene.add(rim);
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(6000, 6000), new THREE.ShadowMaterial({ opacity: 0.5 }));
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(12000, 12000), new THREE.ShadowMaterial({ opacity: 0.5 }));
   ground.rotation.x = -Math.PI / 2; ground.position.y = -0.2; ground.receiveShadow = true;
   scene.add(ground);
 
@@ -99,6 +100,36 @@ function init() {
     map.add(mesh);
   }
   const stateMeshes = Object.values(states);
+  // Name labels on the overview; tiny UTs skipped (hover still names them)
+  const stateLabels = [];
+  const SHORT = { "Andaman and Nicobar Islands": "Andaman & Nicobar", "Jammu and Kashmir": "J & K", "Dadra and Nagar Haveli and Daman and Diu": "" };
+  for (const [name, mesh] of Object.entries(states)) {
+    if (SHORT[name] === "") continue; // scattered enclaves: hover names it
+    const b = new THREE.Box3().setFromObject(mesh), span = Math.max(b.max.x - b.min.x, b.max.z - b.min.z);
+    const el = document.createElement("span");
+    el.className = "state-label"; el.textContent = SHORT[name] || name;
+    const label = new CSS2DObject(el);
+    const [px, py] = M.states[name].c;
+    label.position.set(px - CX, CY - py, H + 1);
+    label.userData = { name, span };
+    mesh.add(label);
+    stateLabels.push(label);
+  }
+  stateLabels.sort((a, b) => b.userData.span - a.userData.span); // big states win label collisions
+  let lastDeclutter = 0;
+  function declutter(now) { // hide a label if it overlaps a bigger state's label (screen space, ~4×/s)
+    if (selected || now - lastDeclutter < 250) return;
+    lastDeclutter = now;
+    const kept = [];
+    for (const l of stateLabels) {
+      if (!l.visible) continue;
+      const r = l.element.getBoundingClientRect();
+      const hit = r.width && kept.some(k => r.left < k.right + 4 && r.right > k.left - 4 && r.top < k.bottom + 2 && r.bottom > k.top - 2);
+      l.element.style.opacity = hit ? "0" : "";
+      if (!hit) kept.push(r);
+    }
+  }
+  const showLabels = on => stateLabels.forEach(l => (l.visible = on && l.userData.span > (mobile() ? 70 : 30)));
   const indiaBox = new THREE.Box3().setFromObject(map);
 
   // ---------- Camera framing (keeps the subject clear of the side panel / bottom sheet) ----------
@@ -119,6 +150,7 @@ function init() {
 
   const DIR = new THREE.Vector3(0, 1, 0.8).normalize(); // ~39° tilt for a state
   const DIR_HOME = new THREE.Vector3(-0.28, 1, 1.25).normalize(); // steeper, slightly turned: reads as a sculpture
+  const home = () => mobile() ? frame(indiaBox, 1.08, new THREE.Vector3(0, 1, 1.25).normalize()) : frame(indiaBox, 1.0, DIR_HOME); // a turn widens India: no room on portrait
   function frame(box, pad = 1.15, dir = DIR) {
     const size = box.getSize(new THREE.Vector3()), centre = box.getCenter(new THREE.Vector3());
     const t = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
@@ -133,7 +165,7 @@ function init() {
   }
 
   // ---------- Districts + pins for the selected state ----------
-  let selected = null, districtGroup = null, districtMeshes = [], pins = [], stateK = 1;
+  let selected = null, districtGroup = null, districtMeshes = [], pins = [], stateK = 1, stateBox = null, depthNow = H;
   function clearState() {
     if (!districtGroup) return;
     map.remove(districtGroup);
@@ -146,7 +178,7 @@ function init() {
     const box = new THREE.Box3().setFromObject(states[name]);
     const span = Math.max(box.max.x - box.min.x, box.max.z - box.min.z);
     stateK = THREE.MathUtils.clamp(span / 140, 0.06, 1.4);
-    const depth = Math.max(1.2, 14 * stateK);
+    const depth = (depthNow = Math.max(1.2, 14 * stateK));
     districtGroup = new THREE.Group();
     (DIST[name] || []).forEach(([dn, d], i) => {
       const shapes = shapesOf(d);
@@ -189,15 +221,15 @@ function init() {
   Y.onState = name => {
     if (name === selected) return;
     selected = name;
-    setHover(null); unpin();
+    setHover(null); unpin(); clearRoute(); showLabels(!name);
     for (const [n, m] of Object.entries(states)) {
       const on = !name || n === name;
       m.visible = n !== name;
       gsap.to(m.material.color, { ...(on ? INK : DIM), duration: 0.8 });
       gsap.to(m.scale, { z: name ? 0.45 : 1, duration: 0.8, ease: "power2.out" });
     }
-    if (!name) { clearState(); fly(frame(indiaBox, 1.0, DIR_HOME)); return; }
-    fly(frame(buildState(name), 1.3));
+    if (!name) { clearState(); fly(home()); return; }
+    fly(frame((stateBox = buildState(name)), 1.3));
   };
   Y.onDest = i => {
     pins.forEach(p => p.label.element.classList.toggle("hot", p.i === i));
@@ -207,6 +239,50 @@ function init() {
       const target = p.pin.getWorldPosition(new THREE.Vector3());
       fly({ target, pos: target.clone().addScaledVector(DIR, Math.max(130 * stateK, 30)) }, 1.3);
     } else if (districtGroup) fly(frame(new THREE.Box3().setFromObject(districtGroup)), 1.3);
+  };
+
+  // ---------- Trip route: arcs per leg, coloured by travel mode, with a travelling spark ----------
+  let route = null, sparks = [];
+  function clearRoute() {
+    if (!route) return;
+    map.remove(route);
+    route.traverse(o => { o.geometry?.dispose(); o.material?.dispose?.(); if (o.isCSS2DObject) o.element.remove(); });
+    route = null; sparks = [];
+    labels.domElement.classList.remove("route");
+  }
+  Y.onPlan = plan => {
+    const had = !!route;
+    clearRoute();
+    if (!plan || !selected) { if (had && stateBox) fly(frame(stateBox, 1.3), 1.2); return; }
+    const pts = plan.stops.map(s => new THREE.Vector3(...local(s.ll), depthNow));
+    const box = new THREE.Box3().setFromPoints(pts), size = box.getSize(new THREE.Vector3());
+    const r = THREE.MathUtils.clamp(Math.max(size.x, size.y) / 520, 0.22, 2);
+    route = new THREE.Group();
+    plan.legs.forEach((leg, i) => {
+      const a = pts[i], b = pts[i + 1], mid = a.clone().lerp(b, 0.5);
+      mid.z += Math.max(a.distanceTo(b) * 0.3, 10 * r);
+      const curve = new THREE.QuadraticBezierCurve3(a, mid, b);
+      const geo = new THREE.TubeGeometry(curve, 64, r, 6, false);
+      const color = new THREE.Color(Y.modeColors[leg.mode] || "#ffffff");
+      const tube = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.1, roughness: 0.4 }));
+      geo.setDrawRange(0, 0);
+      const grow = { n: 0 };
+      gsap.to(grow, { n: geo.index.count, duration: 0.9, delay: 0.5 + i * 0.3, ease: "power2.inOut", onUpdate: () => geo.setDrawRange(0, Math.floor(grow.n / 3) * 3) });
+      const spark = new THREE.Mesh(new THREE.SphereGeometry(r * 2.4, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+      spark.visible = false;
+      setTimeout(() => (spark.visible = true), 1400 + i * 300);
+      route.add(tube, spark);
+      sparks.push({ spark, curve, offset: i * 0.37 });
+    });
+    const el = document.createElement("span");
+    el.className = "pin3d start"; el.textContent = "Start · " + plan.stops[0].n;
+    const start = new CSS2DObject(el);
+    start.position.copy(pts[0]).setZ(depthNow + 4 * r);
+    route.add(start);
+    map.add(route);
+    labels.domElement.classList.add("route"); // pin names would pile up at country scale
+    const fb = new THREE.Box3().setFromObject(route);
+    fly(frame(stateBox ? fb.union(stateBox) : fb, 1.25), 1.6);
   };
 
   // ---------- Hover card (Wikipedia-backed) ----------
@@ -263,6 +339,7 @@ function init() {
     if (hovered) lift(hovered, false);
     hovered = obj;
     if (obj) lift(obj, true);
+    stateLabels.forEach(l => l.element.classList.toggle("hot", obj?.userData.name === l.userData.name));
     renderer.domElement.style.cursor = obj ? "pointer" : "";
     if (!obj && !pinned) card.hidden = true;
   }
@@ -299,8 +376,9 @@ function init() {
   });
 
   // ---------- Loop (paused when the tab is hidden) ----------
-  function loop() {
+  function loop(now) {
     controls.update();
+    for (const s of sparks) s.curve.getPoint(((now / 1000) * 0.22 + s.offset) % 1, s.spark.position);
     if (pointer) {
       toNdc(pointer);
       const obj = pick();
@@ -310,6 +388,7 @@ function init() {
     }
     renderer.render(scene, camera);
     labels.render(scene, camera);
+    declutter(now);
   }
   renderer.setAnimationLoop(loop);
   document.addEventListener("visibilitychange", () => renderer.setAnimationLoop(document.hidden ? null : loop));
@@ -324,10 +403,11 @@ function init() {
   });
 
   // ---------- Intro: slabs rise from the centre, camera settles ----------
+  showLabels(true);
   const start = Y.state();
   if (start) { Y.onState(start); Y.onDest(Y.dest()); return; } // deep link: skip the intro
   stateMeshes.forEach(m => (m.scale.z = 0.001));
   const order = stateMeshes.map(m => [m, new THREE.Box3().setFromObject(m).getCenter(new THREE.Vector3()).length()]).sort((a, b) => a[1] - b[1]);
   gsap.to(order.map(([m]) => m.scale), { z: 1, duration: 1.1, ease: "power3.out", stagger: 0.03, delay: 0.2 });
-  fly(frame(indiaBox, 1.0, DIR_HOME), 2.4);
+  fly(home(), 2.4);
 }

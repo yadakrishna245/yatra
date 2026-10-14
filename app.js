@@ -41,8 +41,9 @@
     wikiCache.set(title, p);
     return p;
   }
-  const wikiQuery = (d, state) => [d.n.split(/ & |, | \(/)[0], `${d.n} ${state}`];
-  const wikiBlock = (title, search) => `<section class="wiki" data-title="${title}" data-search="${search}"><p class="muted">Loading from Wikipedia…</p></section>`;
+  // d.wiki: exact article title where the name alone matches the wrong page ("" = no good article)
+  const wikiQuery = (d, state) => d.wiki !== undefined ? [d.wiki, d.wiki] : [d.n.split(/ & |, | \(/)[0], `${d.n} ${state}`];
+  const wikiBlock = (title, search) => !title ? "" : `<section class="wiki" data-title="${title}" data-search="${search}"><p class="muted">Loading from Wikipedia…</p></section>`;
   function fillWiki() {
     panel.querySelectorAll(".wiki[data-title]").forEach(async box => {
       const w = await wiki(box.dataset.title, box.dataset.search);
@@ -181,6 +182,7 @@
     panel.innerHTML = !current ? homeView() : destI >= 0 ? destView(current, destI) : stateView(current);
     bind();
     fillWiki();
+    Yatra.onPlan?.(current && destI < 0 && tab === "plan" ? lastPlan : null);
     if (window.gsap && !reduceMotion && view !== lastView) reveal();
     lastView = view;
   }
@@ -321,7 +323,8 @@
     origin: prefs.origin || "Delhi", mode: prefs.mode || "car", adults: prefs.adults ?? 2, kids: prefs.kids ?? 0,
     comfort: prefs.comfort || "standard", pace: prefs.pace || "balanced",
   });
-  let only = null;
+  let only = null, lastPlan = null;
+  const MODE_COLORS = { car: "#d9b26a", bike: "#f5cf7a", bus: "#f0a96b", train: "#7fd1a6", flight: "#8fb3ff", cab: "#e9e2d0" };
 
   function planView(name) {
     const o = opts(), s = STATES[name];
@@ -348,7 +351,7 @@
 
   function resultView(name) {
     const o = opts();
-    const p = Planner.planTrip({ ...STATES[name], name }, { ...o, originLL: ORIGINS[o.origin], only: only.list });
+    const p = (lastPlan = Planner.planTrip({ ...STATES[name], name }, { ...o, originLL: ORIGINS[o.origin], only: only.list }));
     if (!p) return `<p class="muted">Select at least one place to build your plan.</p>`;
     const rows = [["Travel to & between", p.cost.travel], ["Local cabs & transfers", p.cost.local], ["Stay", p.cost.stay],
       ["Food", p.cost.food], ["Sightseeing & entry", p.cost.sights], ["Buffer (10%)", p.cost.buffer]].filter(r => r[1] > 0);
@@ -369,7 +372,7 @@
         <div class="bar"><span>${l}</span><div class="track"><i style="width:${(v / max) * 100}%"></i></div><span class="amt">${inr.format(v)}</span></div>`).join("")}
       </div>
       <h2>Route</h2>
-      <ol class="legs">${p.legs.map(l => `<li><b>${l.from} → ${l.to}</b> · ${l.mode === "cab" ? "Cab" : Planner.MODES[l.mode].label} · ${l.km} km · ~${l.hours} h</li>`).join("")}</ol>
+      <ol class="legs">${p.legs.map(l => `<li><i class="dot" style="background:${MODE_COLORS[l.mode]}"></i><b>${l.from} → ${l.to}</b> · ${l.mode === "cab" ? "Cab" : Planner.MODES[l.mode].label} · ${l.km} km · ~${l.hours} h</li>`).join("")}</ol>
       <h2>Day-by-day plan</h2>
       <ol class="timeline">${p.itinerary.map(d => `
         <li class="${d.travel ? "travel" : ""}"><h4><small>Day ${d.day}</small>${d.title}</h4><ul>${d.items.map(i => `<li>${i}</li>`).join("")}</ul></li>`).join("")}
@@ -406,6 +409,7 @@
       only.list = f.getAll("only");
       save();
       $("#result").innerHTML = resultView(current);
+      Yatra.onPlan?.(lastPlan);
       bindResult();
     });
     bindResult();
@@ -418,7 +422,12 @@
   }
   function setTab(t) { tab = t; render(); }
 
-  const Yatra = (window.Yatra = { select: n => select(n), openDest: i => openDest(i), state: () => current, dest: () => destI, wiki });
+  const Yatra = (window.Yatra = { select: n => select(n), openDest: i => openDest(i), state: () => current, dest: () => destI, wiki, modeColors: MODE_COLORS });
+  // Escape steps back out: destination → state → India
+  addEventListener("keydown", e => {
+    if (e.key !== "Escape" || e.target.closest?.("input, select, textarea")) return;
+    if (destI >= 0) select(current, false, -1); else if (current) select(null);
+  });
   const pick = $("#statePick");
   pick.innerHTML = '<option value="">Jump to a state…</option>' + Object.keys(STATES).sort().map(s => `<option>${s}</option>`).join("");
   pick.addEventListener("change", () => { if (pick.value) select(pick.value); pick.value = ""; });

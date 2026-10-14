@@ -11,6 +11,21 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
+  <!-- import map must precede any module load, including modulepreload -->
+  <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js",
+                   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+  </script>
+  <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js">
+  <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js">
+  <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/SVGLoader.js">
+  <script>
+    // Hide the 2D map while the 3D one loads (no flash); give up after 8 s.
+    try {
+      if (!matchMedia("(prefers-reduced-motion: reduce)").matches && document.createElement("canvas").getContext("webgl")) document.documentElement.classList.add("will-3d");
+      setTimeout(() => document.body.classList.contains("is-3d") || document.documentElement.classList.remove("will-3d"), 8000);
+    } catch (e) {}
+  </script>
 </head>
 <body>
   <header class="top">
@@ -47,10 +62,6 @@
   </main>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
-  <script type="importmap">
-    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js",
-                   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
-  </script>
   <script src="map.js"></script>
   <script src="districts.js"></script>
   <script src="data.js"></script>

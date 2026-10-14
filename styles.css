@@ -241,3 +241,13 @@ body.is-3d { background: radial-gradient(1400px 900px at 30% 10%, #1b2645 0%, #0
   .wiki { grid-template-columns: 80px 1fr; }
   .wiki img { width: 80px; height: 80px; }
 }
+.legs li { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex: none; transform: translateY(-1px); }
+.state-label { pointer-events: none; font: 600 9.5px var(--sans); letter-spacing: .16em; text-transform: uppercase; color: #c9c2b4; opacity: .7;
+  text-shadow: 0 1px 6px #000; transition: color .2s, opacity .2s; white-space: nowrap; }
+.state-label.hot { color: var(--gold-2); opacity: 1; }
+.pin3d.start { border-color: #fff; color: #fff; pointer-events: none; }
+.will-3d body:not(.is-3d) #map { visibility: hidden; }
+.will-3d body:not(.is-3d) .map-wrap::after { content: "Preparing the 3D map…"; position: absolute; inset: 0; display: grid; place-items: center;
+  color: var(--gold); font-size: 12px; letter-spacing: .2em; text-transform: uppercase; }
+.gl-labels.route .pin3d:not(.start) { font-size: 0; padding: 5px; }
