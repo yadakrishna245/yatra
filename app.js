@@ -14,6 +14,50 @@
   const band = (base, cost) => `${inr.format(Math.round(base * cost * 0.75 / 100) * 100)} – ${inr.format(Math.round(base * cost * 1.35 / 100) * 100)}`;
   const gmap = (q, d) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([q, d && d.n, current].filter(Boolean).join(", "))}`;
   const ext = 'target="_blank" rel="noopener"';
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  window.gsap?.ticker.lagSmoothing(0); // slow frames (heavy WebGL) must not stall UI reveals
+
+  // Wikipedia summaries (CORS-enabled REST API). Exact title first, then search; cached per session.
+  const WIKI_TITLES = { "Jammu and Kashmir": "Jammu and Kashmir (union territory)", "Punjab": "Punjab, India", "Puducherry": "Puducherry (union territory)" };
+  const wikiCache = new Map();
+  function wiki(title, search = title) {
+    if (wikiCache.has(title)) return wikiCache.get(title);
+    const summary = async t => {
+      const r = await fetch("https://en.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(t.replace(/ /g, "_")));
+      if (!r.ok) return null;
+      const j = await r.json();
+      return j.type === "standard" ? j : null;
+    };
+    const p = (async () => {
+      let j = await summary(WIKI_TITLES[title] || title);
+      if (!j) {
+        const r = await fetch("https://en.wikipedia.org/w/api.php?action=query&list=search&srlimit=1&format=json&origin=*&srsearch=" + encodeURIComponent(search));
+        const t = (await r.json()).query?.search?.[0]?.title;
+        if (t) j = await summary(t);
+      }
+      const img = j?.thumbnail?.source;
+      return j && { title: j.title, text: j.extract, img: img && img.startsWith("https://") ? img : null, url: j.content_urls?.desktop?.page };
+    })().catch(() => null);
+    wikiCache.set(title, p);
+    return p;
+  }
+  const wikiQuery = (d, state) => [d.n.split(/ & |, | \(/)[0], `${d.n} ${state}`];
+  const wikiBlock = (title, search) => `<section class="wiki" data-title="${title}" data-search="${search}"><p class="muted">Loading from Wikipedia…</p></section>`;
+  function fillWiki() {
+    panel.querySelectorAll(".wiki[data-title]").forEach(async box => {
+      const w = await wiki(box.dataset.title, box.dataset.search);
+      if (!box.isConnected) return;
+      box.textContent = "";
+      if (!w) return box.remove();
+      if (w.img) box.append(Object.assign(document.createElement("img"), { src: w.img, alt: w.title, loading: "lazy" }));
+      const body = document.createElement("div");
+      body.append(Object.assign(document.createElement("p"), { textContent: w.text }));
+      const a = Object.assign(document.createElement("a"), { href: w.url, target: "_blank", rel: "noopener", textContent: `From Wikipedia: ${w.title} ↗` });
+      a.className = "credit";
+      body.append(a);
+      box.append(body);
+    });
+  }
 
   // Mercator, same projection the map paths were generated with (docs/map-gen.mjs)
   const project = ([lat, lng]) => {
@@ -90,6 +134,8 @@
       drawPins(name);
     }
     markPin(destI);
+    if (!sameState) Yatra.onState?.(name);
+    Yatra.onDest?.(destI);
     render();
     if (!fromHash) {
       const h = name ? "#" + encodeURIComponent(name) + (destI >= 0 ? "/" + encodeURIComponent(STATES[name].dest[destI].n) : "") : location.pathname;
@@ -131,8 +177,24 @@
 
   // ---------- Panel ----------
   function render() {
+    const view = (current || "") + "/" + destI;
     panel.innerHTML = !current ? homeView() : destI >= 0 ? destView(current, destI) : stateView(current);
     bind();
+    fillWiki();
+    if (window.gsap && !reduceMotion && view !== lastView) reveal();
+    lastView = view;
+  }
+  let lastView = null;
+  // Headline word-by-word, then the rest of the panel. The h1 keeps its plain text as aria-label.
+  function reveal() {
+    const h = panel.querySelector("h1");
+    if (h) {
+      h.setAttribute("aria-label", h.textContent);
+      h.innerHTML = h.innerHTML.split(/(<br>)/).map(part => part === "<br>" ? part :
+        part.split(" ").map(w => w ? `<span class="word" aria-hidden="true"><span>${w}</span></span>` : "").join(" ")).join("");
+      gsap.fromTo(h.querySelectorAll(".word > span"), { yPercent: 110 }, { yPercent: 0, duration: 0.8, ease: "power4.out", stagger: 0.06 });
+    }
+    gsap.fromTo([...panel.children].filter(c => c !== h), { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "power3.out", stagger: 0.04, delay: 0.15, clearProps: "all" });
   }
 
   function homeView() {
@@ -151,7 +213,8 @@
       <div class="chips">${picks.map(p => `<button class="chip" data-go="${p}">${p}</button>`).join("")}</div>
       <h2>How it works</h2>
       <ol class="steps">
-        <li><span>Pick a state on the map, or search any city or sight, e.g. "Charminar".</span></li>
+        <li><span>Hover a state to preview it, click to fly in. Inside, hover any district for its story.</span></li>
+        <li><span>Or search any city or sight, e.g. "Charminar".</span></li>
         <li><span>Open a destination to see places to visit, famous local food and hotels.</span></li>
         <li><span>Open <b>Plan trip</b>: choose your city, travellers and how you'll travel.</span></li>
         <li><span>Get total days, a full budget breakdown and a day-by-day itinerary. Print it or save it as a PDF.</span></li>
@@ -166,6 +229,7 @@
       <p class="eyebrow">${s.type === "UT" ? "Union Territory" : "State"}</p>
       <h1>${name}</h1>
       <p class="lede">${s.tagline}</p>
+      ${tab === "overview" ? wikiBlock(name, name + " India") : ""}
       <div class="meta">
         <span>Capital <b>${s.capital}</b></span>
         <span>Best time <b>${s.best}</b></span>
@@ -228,6 +292,7 @@
         <span>Best time <b>${s.best}</b></span>
         <a class="link" href="${gmap(d.n)}" ${ext}>Open in Google Maps ↗</a>
       </div>
+      ${wikiBlock(...wikiQuery(d, name))}
       <div class="actions"><button class="btn solid" data-planhere>Plan a trip to ${d.n}</button>${s.dest.length > 1 ? `<button class="btn" data-planall>Plan all of ${name}</button>` : ""}</div>
 
       <h2>Places to visit</h2>
@@ -353,5 +418,9 @@
   }
   function setTab(t) { tab = t; render(); }
 
+  const Yatra = (window.Yatra = { select: n => select(n), openDest: i => openDest(i), state: () => current, dest: () => destI, wiki });
+  const pick = $("#statePick");
+  pick.innerHTML = '<option value="">Jump to a state…</option>' + Object.keys(STATES).sort().map(s => `<option>${s}</option>`).join("");
+  pick.addEventListener("change", () => { if (pick.value) select(pick.value); pick.value = ""; });
   fromHash();
 })();

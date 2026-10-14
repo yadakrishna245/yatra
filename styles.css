@@ -1,3 +1,4 @@
+[hidden] { display: none !important; }
 :root {
   --bg: #0a0e16;
   --bg-2: #111725;
@@ -179,3 +180,64 @@ select, input[type=number] { padding: 10px 12px; border-radius: 10px; border: 1p
 .btn.solid { background: var(--gold); color: #1a1407; font-weight: 600; }
 .btn.solid:hover { background: var(--gold-2); }
 .actions { flex-wrap: wrap; }
+
+/* ---------- 3D mode (added by map3d.js when WebGL is available) ---------- */
+.state-pick { padding: 10px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg-2); max-width: 200px; }
+.map-hint { display: none; }
+body.is-3d { background: radial-gradient(1400px 900px at 30% 10%, #1b2645 0%, #0a0e16 55%, #06080d 100%) fixed; }
+.is-3d .top { background: linear-gradient(#06080dcc, #06080d00); border-bottom: 0; backdrop-filter: none; }
+.is-3d .layout { display: block; min-height: 0; }
+.is-3d .map-wrap { position: fixed; inset: 0; height: 100vh; padding: 0; z-index: 0; }
+.is-3d #map, .is-3d #tip { display: none; }
+.gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
+.gl-labels { position: absolute; inset: 0; pointer-events: none; }
+.is-3d .panel { position: relative; z-index: 2; margin-left: auto; width: min(500px, 100%); min-height: calc(100vh - 69px);
+  background: rgba(9, 12, 20, .78); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border-left: 1px solid #d9b26a26; padding: 32px 36px 64px; }
+.is-3d .reset { top: 88px; z-index: 3; }
+.is-3d .map-note { z-index: 3; bottom: 10px; left: 16px; max-width: 46%; }
+.is-3d .map-hint { display: block; position: absolute; left: 16px; bottom: 30px; margin: 0; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--gold); opacity: .8; z-index: 3; }
+.is-3d .kpis { grid-template-columns: 1fr 1fr; }
+.is-3d .bar { grid-template-columns: 120px 1fr 84px; }
+
+/* Destination labels on the 3D map */
+.pin3d { pointer-events: auto; transform: translateY(-50%); font: 600 12px var(--sans); color: var(--text); background: rgba(10, 14, 22, .85);
+  border: 1px solid var(--gold); padding: 5px 11px; border-radius: 999px; cursor: pointer; white-space: nowrap; transition: background .2s, color .2s; }
+.pin3d:hover, .pin3d:focus-visible, .pin3d.hot { background: var(--gold); color: #1a1407; }
+
+/* Hover card */
+.hovercard { position: fixed; z-index: 4; width: 340px; max-width: calc(100vw - 24px); pointer-events: none; overflow: hidden;
+  background: rgba(10, 14, 22, .9); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border: 1px solid #d9b26a55; border-radius: 16px; box-shadow: 0 24px 60px -20px #000c; }
+.hovercard.pinned { pointer-events: auto; border-color: var(--gold); }
+.hc-img { display: block; width: 100%; height: 150px; object-fit: cover; }
+.hc-body { padding: 14px 18px 16px; }
+.hc-eyebrow { margin: 0 0 4px; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--gold); }
+.hc-title { font-size: 22px; }
+.hc-meta { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+.hc-text { margin: 10px 0 0; font-size: 13.5px; line-height: 1.55; color: #d7d0c2; display: -webkit-box; -webkit-line-clamp: 7; -webkit-box-orient: vertical; overflow: hidden; }
+.hc-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.hc-chips span, .hc-chips button { font-size: 11px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: none; }
+.hc-chips button { color: var(--gold-2); border-color: var(--gold); cursor: pointer; }
+.hc-more { display: inline-block; margin-top: 10px; font-size: 12px; color: var(--gold-2); }
+.hc-hint { margin: 8px 0 0; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--gold); }
+.hc-hint:empty { display: none; }
+
+/* Wikipedia block in the panel */
+.wiki { display: grid; grid-template-columns: 112px 1fr; gap: 16px; margin: 22px 0 0; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: #ffffff05; }
+.wiki img { width: 112px; height: 112px; object-fit: cover; border-radius: 10px; }
+.wiki p { margin: 0; font-size: 14px; color: #d7d0c2; display: -webkit-box; -webkit-line-clamp: 7; -webkit-box-orient: vertical; overflow: hidden; }
+.wiki:not(:has(img)) { grid-template-columns: 1fr; }
+.credit { display: inline-block; margin-top: 8px; font-size: 12px; color: var(--gold-2); }
+.word { display: inline-block; overflow: hidden; vertical-align: bottom; }
+.word > span { display: inline-block; }
+
+@media (max-width: 960px) {
+  .state-pick { display: none; }
+  .is-3d .map-wrap { height: 100vh; }
+  .is-3d .panel { width: 100%; margin-top: 50vh; min-height: 50vh; border-left: 0; border-top: 1px solid #d9b26a40; border-radius: 22px 22px 0 0; padding: 26px 16px 48px; }
+  .is-3d .map-note { display: none; }
+  .is-3d .map-hint { display: none; }
+  .hovercard { width: 300px; }
+  .wiki { grid-template-columns: 80px 1fr; }
+  .wiki img { width: 80px; height: 80px; }
+}

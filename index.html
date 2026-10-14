@@ -19,6 +19,7 @@
       <input id="search" type="search" list="places" placeholder="Search a state, city or sight — e.g. Charminar" aria-label="Search a state, city or sight" autocomplete="off">
       <datalist id="places"></datalist>
     </div>
+    <select id="statePick" class="state-pick" aria-label="Jump to a state"></select>
   </header>
 
   <main class="layout">
@@ -26,13 +27,32 @@
       <svg id="map" role="group" aria-label="Indian states and union territories — select one"></svg>
       <div id="tip" class="tip" hidden></div>
       <button id="reset" class="reset" hidden>← All of India</button>
-      <p class="map-note">Map for illustration only.</p>
+      <p class="map-note">Map for illustration only · District boundaries: india-maps-data · Descriptions & photos: Wikipedia (CC BY-SA)</p>
+      <p class="map-hint" aria-hidden="true">Drag to orbit · Scroll to zoom · Hover for details</p>
+      <aside id="hovercard" class="hovercard" hidden>
+        <img class="hc-img" alt="" hidden>
+        <div class="hc-body">
+          <p class="hc-eyebrow"></p>
+          <h3 class="hc-title"></h3>
+          <p class="hc-meta"></p>
+          <p class="hc-text"></p>
+          <div class="hc-chips"></div>
+          <a class="hc-more" target="_blank" rel="noopener" hidden>Read on Wikipedia ↗</a>
+          <p class="hc-hint"></p>
+        </div>
+      </aside>
     </section>
 
     <section class="panel" id="panel" aria-live="polite"></section>
   </main>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js",
+                   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+  </script>
   <script src="map.js"></script>
+  <script src="districts.js"></script>
   <script src="data.js"></script>
   <script src="data-south.js"></script>
   <script src="data-west.js"></script>
@@ -40,5 +60,6 @@
   <script src="data-east.js"></script>
   <script src="planner.js"></script>
   <script src="app.js"></script>
+  <script type="module" src="map3d.js"></script>
 </body>
 </html>
