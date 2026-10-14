@@ -6,7 +6,14 @@
   const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
   const prefs = (() => { try { return JSON.parse(localStorage.getItem("yatra") || "{}"); } catch { return {}; } })();
   const save = () => { try { localStorage.setItem("yatra", JSON.stringify(prefs)); } catch {} };
-  let current = null, tab = "overview", zoomScale = 1;
+  let current = null, destI = -1, tab = "overview", zoomScale = 1;
+
+  const list = s => (s ? s.split("; ") : []);
+  const title = s => s.split(" — ")[0];
+  const STAY_BASE = { low: 1600, mid: 3800, lux: 10000 }; // same base rates as planner.js
+  const band = (base, cost) => `${inr.format(Math.round(base * cost * 0.75 / 100) * 100)} – ${inr.format(Math.round(base * cost * 1.35 / 100) * 100)}`;
+  const gmap = (q, d) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([q, d && d.n, current].filter(Boolean).join(", "))}`;
+  const ext = 'target="_blank" rel="noopener"';
 
   // Mercator, same projection the map paths were generated with (docs/map-gen.mjs)
   const project = ([lat, lng]) => {
@@ -43,9 +50,9 @@
     if (!name) { zoom.style.transform = ""; zoomScale = 1; return; }
     const { x, y, width, height } = paths[name].getBBox(), b = { x, y, width, height };
     for (const d of STATES[name].dest) { // include pins (islands spread wider than outline)
-      const [x, y] = project(d.ll);
-      const x0 = Math.min(b.x, x), y0 = Math.min(b.y, y);
-      b.width = Math.max(b.x + b.width, x) - x0; b.height = Math.max(b.y + b.height, y) - y0; b.x = x0; b.y = y0;
+      const [px, py] = project(d.ll);
+      const x0 = Math.min(b.x, px), y0 = Math.min(b.y, py);
+      b.width = Math.max(b.x + b.width, px) - x0; b.height = Math.max(b.y + b.height, py) - y0; b.x = x0; b.y = y0;
     }
     const s = Math.min(14, 0.78 * Math.min(M.w / Math.max(b.width, 1), M.h / Math.max(b.height, 1)));
     zoomScale = s;
@@ -61,75 +68,93 @@
       const [x, y] = project(d.ll);
       const g = el("g", { class: "pin", "data-i": i, tabindex: 0, role: "button", "aria-label": d.n }, pinsG);
       el("circle", { cx: x, cy: y, r: 6 / s }, g);
-      const t = el("text", { x: x + 9 / s, y: y + 4 / s, "font-size": 12 / s, "stroke-width": 3 / s }, g);
+      const t = el("text", { x: x + 9 / s, y: y + 4 / s, "font-size": 11 / s, "stroke-width": 3 / s }, g);
       t.textContent = d.n;
-      g.addEventListener("click", e => { e.stopPropagation(); highlight(i, true); });
+      g.addEventListener("click", e => { e.stopPropagation(); openDest(i); });
+      g.addEventListener("keydown", e => e.key === "Enter" && openDest(i));
     });
   }
+  const markPin = i => document.querySelectorAll(".pin").forEach(p => p.classList.toggle("hot", +p.dataset.i === i));
 
-  function highlight(i, scroll) {
-    document.querySelectorAll(".pin").forEach(p => p.classList.toggle("hot", +p.dataset.i === i));
-    document.querySelectorAll(".card.dest").forEach(c => c.classList.toggle("hot", +c.dataset.i === i));
-    if (scroll) {
-      if (tab !== "overview") setTab("overview");
-      document.querySelector(`.card.dest[data-i="${i}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  // ---------- Selection & routing (#State or #State/Destination) ----------
+  function select(name, fromHash, i = -1) {
+    if (name && !STATES[name]) return;
+    const sameState = name === current;
+    current = name; destI = name ? i : -1;
+    if (!sameState) {
+      for (const n in paths) paths[n].classList.toggle("on", n === name);
+      svg.classList.toggle("dim", !!name);
+      reset.hidden = !name;
+      tab = "overview";
+      zoomTo(name);
+      drawPins(name);
+    }
+    markPin(destI);
+    render();
+    if (!fromHash) {
+      const h = name ? "#" + encodeURIComponent(name) + (destI >= 0 ? "/" + encodeURIComponent(STATES[name].dest[destI].n) : "") : location.pathname;
+      history.replaceState(null, "", h);
+      if (name && matchMedia("(max-width: 960px)").matches) panel.scrollIntoView({ behavior: "smooth" });
+      else window.scrollTo({ top: 0, behavior: "smooth" });
     }
   }
-
-  // ---------- Selection & routing ----------
-  function select(name, fromHash) {
-    if (name && !STATES[name]) return;
-    current = name;
-    for (const n in paths) paths[n].classList.toggle("on", n === name);
-    svg.classList.toggle("dim", !!name);
-    reset.hidden = !name;
-    if (name) tab = "overview";
-    zoomTo(name);
-    drawPins(name);
-    render();
-    if (!fromHash) history.replaceState(null, "", name ? "#" + encodeURIComponent(name) : location.pathname);
-    if (name && !fromHash && matchMedia("(max-width: 960px)").matches) panel.scrollIntoView({ behavior: "smooth" });
+  const openDest = i => select(current, false, i);
+  function fromHash() {
+    const [s, d] = location.hash.slice(1).split("/").map(decodeURIComponent);
+    const i = s && STATES[s] ? STATES[s].dest.findIndex(x => x.n === d) : -1;
+    select(s || null, true, i);
   }
   reset.addEventListener("click", () => select(null));
-  window.addEventListener("hashchange", () => select(decodeURIComponent(location.hash.slice(1)) || null, true));
-  
-  // Search: states and destinations
+  window.addEventListener("hashchange", fromHash);
+
+  // Search: states, destinations and individual attractions
   const places = {};
-  for (const [s, v] of Object.entries(STATES)) { places[s] = s; for (const d of v.dest) places[`${d.n} — ${s}`] = s; }
-  $("#places").innerHTML = Object.keys(places).sort().map(p => `<option value="${p}">`).join("");
+  for (const [s, v] of Object.entries(STATES)) {
+    places[s] = [s, -1];
+    v.dest.forEach((d, i) => {
+      places[`${d.n} — ${s}`] = [s, i];
+      for (const p of list(d.see)) places[`${title(p)} — ${d.n}, ${s}`] ||= [s, i];
+    });
+  }
+  const keys = Object.keys(places).sort();
+  $("#places").innerHTML = keys.map(p => `<option value="${p.replace(/"/g, "&quot;")}">`).join("");
   $("#search").addEventListener("change", e => {
-    const key = Object.keys(places).find(k => k.toLowerCase() === e.target.value.trim().toLowerCase())
-      || Object.keys(places).find(k => k.toLowerCase().includes(e.target.value.trim().toLowerCase()));
+    const q = e.target.value.trim().toLowerCase();
+    if (!q) return;
+    const key = keys.find(k => k.toLowerCase() === q) || keys.find(k => k.toLowerCase().startsWith(q)) || keys.find(k => k.toLowerCase().includes(q));
     if (!key) return;
-    select(places[key]);
-    const destName = key.split(" — ")[0], i = STATES[places[key]].dest.findIndex(d => d.n === destName);
-    if (i >= 0) highlight(i, true);
+    const [s, i] = places[key];
+    if (s !== current) select(s);
+    if (i >= 0) openDest(i);
     e.target.value = "";
   });
 
   // ---------- Panel ----------
-  function render() { panel.innerHTML = current ? stateView(current) : homeView(); bind(); }
+  function render() {
+    panel.innerHTML = !current ? homeView() : destI >= 0 ? destView(current, destI) : stateView(current);
+    bind();
+  }
 
   function homeView() {
     const n = Object.values(STATES), dests = n.reduce((a, s) => a + s.dest.length, 0);
-    const picks = ["Rajasthan", "Kerala", "Himachal Pradesh", "Goa", "Ladakh", "Meghalaya", "Tamil Nadu", "Uttarakhand"];
+    const picks = ["Rajasthan", "Kerala", "Telangana", "Himachal Pradesh", "Goa", "Ladakh", "Meghalaya", "Tamil Nadu", "Uttarakhand"];
     return `
       <p class="eyebrow">Your personal India guide</p>
       <h1>Discover India,<br>one state at a time.</h1>
-      <p class="lede">Tap any state on the map to explore its best places, signature food and stays — then get a day-by-day plan with an honest budget for your car, bike, bus, train or flight.</p>
+      <p class="lede">Tap any state on the map to explore its places, local food and the best hotels from luxury to budget, then get a day-by-day plan with an honest budget for your car, bike, bus, train or flight.</p>
       <div class="stats">
         <div class="stat"><b>${n.length}</b><span>States & UTs</span></div>
         <div class="stat"><b>${dests}</b><span>Destinations</span></div>
-        <div class="stat"><b>5</b><span>Ways to travel</span></div>
+        <div class="stat"><b>${Math.floor((keys.length - n.length - dests) / 100) * 100}+</b><span>Places to visit</span></div>
       </div>
       <h2>Popular right now</h2>
       <div class="chips">${picks.map(p => `<button class="chip" data-go="${p}">${p}</button>`).join("")}</div>
       <h2>How it works</h2>
       <ol class="steps">
-        <li><span>Pick a state on the map, or search for a place.</span></li>
-        <li><span>Browse destinations, local food and where to stay.</span></li>
+        <li><span>Pick a state on the map, or search any city or sight, e.g. "Charminar".</span></li>
+        <li><span>Open a destination to see places to visit, famous local food and hotels.</span></li>
         <li><span>Open <b>Plan trip</b>: choose your city, travellers and how you'll travel.</span></li>
-        <li><span>Get total days, a full budget breakdown and a day-by-day itinerary — print it or save it as a PDF.</span></li>
+        <li><span>Get total days, a full budget breakdown and a day-by-day itinerary. Print it or save it as a PDF.</span></li>
       </ol>`;
   }
 
@@ -153,30 +178,76 @@
   function tabBody(name) {
     const s = STATES[name];
     if (tab === "food") return `
-      <h2>Must-try food</h2>
-      <div class="food">${s.foods.map(([f, d]) => `<div class="card"><b>${f}</b><p>${d}</p></div>`).join("")}</div>`;
-    if (tab === "stay") {
-      const [b, m, l] = [1600, 3800, 10000].map(x => Math.round(x * s.cost / 100) * 100);
-      const band = x => `${inr.format(Math.round(x * 0.75 / 100) * 100)} – ${inr.format(Math.round(x * 1.35 / 100) * 100)}`;
-      return `
-        <h2>Where to stay</h2>
-        <p class="muted">${s.stay}.</p>
-        <div class="tiers">
-          <div class="card"><span class="tag">Budget</span><b>${band(b)}</b><p>Guest houses, homestays, hostels</p></div>
-          <div class="card"><span class="tag">Standard</span><b>${band(m)}</b><p>3★ hotels, boutique stays</p></div>
-          <div class="card"><span class="tag">Luxury</span><b>${band(l)}</b><p>4–5★, heritage & resorts</p></div>
-        </div>
-        <p class="fine">Typical price per room per night in season (2026). Peak holidays can be 30–60% higher.</p>`;
-    }
+      <h2>Signature dishes</h2>
+      <div class="food">${s.foods.map(([f, d]) => `<div class="card"><b>${f}</b><p>${d}</p></div>`).join("")}</div>
+      <h2>Where locals eat</h2>
+      <div class="grid">${s.dest.map((d, i) => `
+        <div class="card"><div class="card-head"><h3>${d.n}</h3><button class="more" data-dest="${i}">Open →</button></div>
+        <ul class="hotels">${list(d.eat).map(x => { const [dish, at] = x.split(" @ "); return `<li><b>${dish}</b>${at ? ` · ${at}` : ""}</li>`; }).join("")}</ul></div>`).join("")}
+      </div>`;
+    if (tab === "stay") return `
+      <h2>Price guide</h2>
+      <div class="tiers">
+        <div class="card"><span class="tag">Budget & safe</span><b>${band(STAY_BASE.low, s.cost)}</b><p>Govt tourism hotels, branded budget chains, hostels</p></div>
+        <div class="card"><span class="tag">Mid-range</span><b>${band(STAY_BASE.mid, s.cost)}</b><p>3–4★ hotels, boutique & heritage stays</p></div>
+        <div class="card"><span class="tag">Luxury</span><b>${band(STAY_BASE.lux, s.cost)}</b><p>5★, palaces & resorts</p></div>
+      </div>
+      <p class="fine">Typical price per room per night in season (2026). Peak holidays can be 30–60% higher. ${s.stay}.</p>
+      <h2>Hotels by destination</h2>
+      <div class="grid">${s.dest.map((d, i) => `
+        <div class="card"><div class="card-head"><h3>${d.n}</h3><button class="more" data-dest="${i}">All stays →</button></div>
+        ${stayLists(d)}</div>`).join("")}
+      </div>`;
     if (tab === "plan") return planView(name);
     return `
       <div class="grid">${s.dest.map((d, i) => `
-        <article class="card dest" data-i="${i}" tabindex="0">
+        <article class="card dest" data-dest="${i}" tabindex="0" role="button" aria-label="Open ${d.n}">
           <div class="card-head"><h3>${d.n}</h3><span class="tag">${d.t}</span></div>
-          <p>${d.h}.</p>
-          <p class="days" style="margin-top:8px">Recommended: ${d.d} day${d.d > 1 ? "s" : ""}</p>
+          <p>${list(d.see).slice(0, 6).map(title).join(" · ")}</p>
+          <div class="card-foot"><span class="days">Recommended: ${d.d} day${d.d > 1 ? "s" : ""}</span><span class="more">Places, food & stays →</span></div>
         </article>`).join("")}
       </div>
+      <p class="callout"><b>Local tip:</b> ${s.tips}</p>`;
+  }
+
+  const TIERS = [["lux", "Luxury"], ["mid", "Mid-range"], ["low", "Budget & safe"]];
+  const stayLists = d => TIERS.filter(([k]) => d[k]).map(([k, label]) => `
+      <div class="stay-tier"><span class="tag">${label}</span>
+        <ul class="hotels">${list(d[k]).slice(0, 2).map(h => `<li><a href="${gmap(title(h), d)}" ${ext}>${h}</a></li>`).join("")}</ul></div>`).join("");
+
+  function destView(name, i) {
+    const s = STATES[name], d = s.dest[i];
+    const see = list(d.see).map(x => x.split(" — "));
+    const eat = list(d.eat).map(x => x.split(" @ "));
+    return `
+      <button class="back" data-back>← All of ${name}</button>
+      <p class="eyebrow">${d.t} · ${name}</p>
+      <h1>${d.n}</h1>
+      <div class="meta">
+        <span>Recommended <b>${d.d} day${d.d > 1 ? "s" : ""}</b></span>
+        <span>Best time <b>${s.best}</b></span>
+        <a class="link" href="${gmap(d.n)}" ${ext}>Open in Google Maps ↗</a>
+      </div>
+      <div class="actions"><button class="btn solid" data-planhere>Plan a trip to ${d.n}</button>${s.dest.length > 1 ? `<button class="btn" data-planall>Plan all of ${name}</button>` : ""}</div>
+
+      <h2>Places to visit</h2>
+      <div class="places">${see.map(([p, note]) => `
+        <a class="place" href="${gmap(p, d)}" ${ext}><b>${p}</b>${note ? `<span>${note}</span>` : ""}</a>`).join("")}
+      </div>
+
+      <h2>Famous local food</h2>
+      <div class="food">${eat.map(([dish, at]) => `
+        <div class="card"><b>${dish}</b>${at ? `<p>Try at <a href="${gmap(at.split(",")[0], d)}" ${ext}>${at}</a></p>` : ""}</div>`).join("")}
+      </div>
+
+      <h2>Where to stay</h2>
+      <div class="stays">${TIERS.filter(([k]) => d[k]).map(([k, label]) => `
+        <div class="card">
+          <div class="card-head"><span class="tag">${label}</span><span class="days">${band(STAY_BASE[k], s.cost)} / night</span></div>
+          <ul class="hotels">${list(d[k]).map(h => `<li><a href="${gmap(title(h), d)}" ${ext}>${h}</a></li>`).join("")}</ul>
+        </div>`).join("")}
+      </div>
+      <p class="fine">Hotels are well-known options, not paid listings. Budget picks favour government tourism hotels and branded chains with 24×7 front desks. Tap any name to open it in Google Maps and check recent reviews before booking.</p>
       <p class="callout"><b>Local tip:</b> ${s.tips}</p>`;
   }
 
@@ -242,14 +313,26 @@
       <p class="fine">Estimates use 2026 average prices: fuel ~₹105/L, tolls, Sleeper/3AC/2AC rail fares, economy/premium fares, room rates by state. Distances are approximate road/rail routes. Always check live fares and seasonal closures before booking.</p>`;
   }
 
+  function planFor(names) {
+    only = { state: current, list: names };
+    destI = -1; tab = "plan";
+    history.replaceState(null, "", "#" + encodeURIComponent(current));
+    markPin(-1); render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   function bind() {
     panel.querySelectorAll("[data-go]").forEach(b => b.addEventListener("click", () => select(b.dataset.go)));
     panel.querySelectorAll(".tab").forEach(b => b.addEventListener("click", () => setTab(b.dataset.tab)));
-    panel.querySelectorAll(".card.dest").forEach(c => {
-      const go = () => highlight(+c.dataset.i);
+    panel.querySelectorAll("[data-dest]").forEach(c => {
+      const go = () => openDest(+c.dataset.dest);
       c.addEventListener("click", go);
       c.addEventListener("keydown", e => e.key === "Enter" && go());
+      c.addEventListener("mouseenter", () => markPin(+c.dataset.dest));
     });
+    panel.querySelector("[data-back]")?.addEventListener("click", () => select(current, false, -1));
+    panel.querySelector("[data-planhere]")?.addEventListener("click", () => planFor([STATES[current].dest[destI].n]));
+    panel.querySelector("[data-planall]")?.addEventListener("click", () => planFor(STATES[current].dest.map(d => d.n)));
     const form = $("#planForm");
     if (form) form.addEventListener("input", () => {
       const f = new FormData(form);
@@ -270,5 +353,5 @@
   }
   function setTab(t) { tab = t; render(); }
 
-  select(decodeURIComponent(location.hash.slice(1)) || null, true);
+  fromHash();
 })();

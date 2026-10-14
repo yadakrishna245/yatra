@@ -42,7 +42,7 @@
   }
 
   function legHours(m, km) {
-    if (m === "cab") return km / 45;
+    if (m === "cab") return km / 55; // hired car with driver
     return km / MODES[m].speed + (MODES[m].overhead || 0);
   }
 
@@ -121,7 +121,7 @@
     route.forEach((d, i) => {
       const leg = legs[i];
       pushTravel(leg);
-      const hl = d.h.split(", ");
+      const hl = d.see.split("; ").map(s => s.split(" — ")[0]);
       const n = destDays[i], per = Math.ceil(hl.length / n);
       for (let k = 0; k < n; k++) {
         const items = hl.slice(k * per, (k + 1) * per);
